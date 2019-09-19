@@ -1,3 +1,4 @@
+
 /* eslint-disable */
 import Vue from 'vue';
 import router from './routers';
@@ -7,12 +8,10 @@ import * as utils from '__gUtils/busiUtils'
 import {Tag, Table, TableColumn, Col, Row, Input, InputNumber, DatePicker, Select, Option, Button, Tabs, TabPane, Card, Container, Header, Aside, Main, Footer, Dropdown, DropdownMenu, DropdownItem, Switch, MessageBox, Popover, Dialog, Loading, Radio, RadioGroup, Form, FormItem, Notification, Checkbox, Tooltip} from 'element-ui';
 import moment from 'moment';
 import App from './App.vue';
-import { listProcessStatus, startMaster, startWatcher } from '__gUtils/processUtils';
+import { listProcessStatus, startMaster, startLedger } from '__gUtils/processUtils';
 import { ipcRenderer } from 'electron'
 import '@/assets/iconfont/iconfont.js';
 import '@/assets/iconfont/iconfont.css';
-
-
 
 //element
 Vue.use(Tag)
@@ -57,7 +56,6 @@ Vue.notify =  Vue.prototype.$notify = Notification;
 //tr的
 Vue.use(Components)
 
-
 //moment 格式
 Vue.filter('moment', function (value, formatString) {
     formatString = formatString || 'YYYY-MM-DD HH:mm:ss';
@@ -80,12 +78,14 @@ export const startGetProcessStatus = () => {
 
 //start pm2 kungfu master
 process.env.ELECTRON_RUN_AS_NODE = true;
+
 startMaster(false)
 .catch(err => console.error(err))
 .finally(() => {
-    startWatcher(false)
+    startGetProcessStatus();
+    utils.delaySeconds(1000)
+    .then(() => startLedger(false))
     .catch(err => console.error(err))
-    .finally(() => startGetProcessStatus())
 })
 
 
@@ -99,7 +99,7 @@ new Vue({
 
 
 //自动更新逻辑
-startAutoUpdate()
+// startAutoUpdate()
 
 function startAutoUpdate(){
     if(window.location.href.split('#')[1].indexOf('code') !== -1) return;
@@ -112,5 +112,12 @@ function startAutoUpdate(){
 
 window.fileId = 0;
 
-console.log(process.version)
+window.setTradingDay = (targetDay) => {
+    store.dispatch('setTradingDay', targetDay)
+}
 
+window.getTradingDay = () => {
+    return store.state.BASE.tradingDay
+}
+
+window.store = store

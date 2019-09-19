@@ -14,8 +14,8 @@
                 >
                     <template slot-scope="props">
                         <el-tag
-                        v-if="(config[props.row.source_name] || {}).typeName"
-                        :type="config[props.row.source_name].type" 
+                        v-if="(accountSource[props.row.source_name] || {}).typeName"
+                        :type="accountSource[props.row.source_name].type" 
                         >
                             {{props.row.source_name}}
                         </el-tag>
@@ -64,6 +64,7 @@
             </el-table>
         </div>
         <SetMdSourceDialog 
+        v-if="setMdSourceDialogVisiblity"
         :visible.sync="setMdSourceDialogVisiblity"
         :currentMdSourceAccount="currentMdSourceAccount"
         :accountsFromSameSource="accountList.filter(a => (a.source_name === (currentMdSourceAccount || {}).source_name))"
@@ -76,9 +77,7 @@
 import path from 'path';
 import Vue from 'vue';
 import { mapState, mapGetters } from 'vuex';
-import { sourceType } from '__gConfig/accountConfig'
 import * as ACCOUNT_API from '__io/db/account';
-import { openReadFile } from '__gUtils/fileUtils';
 import { LOG_DIR } from '__gConfig/pathConfig';
 import { switchMd } from '__io/actions/account';
 import SetMdSourceDialog from './SetMdSourceDialog';
@@ -86,7 +85,6 @@ import SetMdSourceDialog from './SetMdSourceDialog';
 export default {
     data(){
         return {
-            config: sourceType,
             setMdSourceDialogVisiblity: false,
             currentMdSourceAccount: null,
             renderTable: false
@@ -95,6 +93,7 @@ export default {
 
     computed: {
         ...mapState({
+            accountSource: state => state.BASE.accountSource || {},
             accountList: state => state.ACCOUNT.accountList,
             mdTdState: state => state.ACCOUNT.mdTdState,
             processStatus: state => state.BASE.processStatus
@@ -134,7 +133,7 @@ export default {
 
         handleOpenLogFile(row){
             const logPath = path.join(LOG_DIR, `md_${row.source_name}.log`);
-            openReadFile(logPath);
+            this.$showLog(logPath)
         },
 
         //获取账户列表

@@ -5,8 +5,8 @@ const sqlite3 = require('kungfu-core').sqlite3.verbose();
  * @param  {sql string} sql
  * @param  {sql args} args
  */
-export const runInsertUpdateDeleteDB = (dbPath: string, sql: string, args: any): Promise<any> => {
-        return new Promise((resolve, reject) => {
+export const runInsertUpdateDeleteDB = (dbPath: string, sql: string, args?: any): Promise<any> => {   
+    return new Promise((resolve, reject) => {
             if(!existsSync(dbPath)){
                 throw new Error(`${dbPath} 不存在！`)
             }
@@ -69,7 +69,7 @@ export const runClearDB = (dbPath: string, tableName: string): Promise<any> => {
 export const runSelectDB = (dbPath: string, sql: string, args?: any): Promise<any[]> =>{
     return new Promise((resolve, reject) => {
         if(!existsSync(dbPath)){
-            if(process.env.NODE_ENV !== 'production') throw new Error(`${dbPath} is not exist`)
+            if(process.env.NODE_ENV === 'development') throw new Error(`${dbPath} is not exist`)
             resolve([]);
             return;
         }

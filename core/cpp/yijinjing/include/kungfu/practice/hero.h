@@ -37,6 +37,9 @@ namespace kungfu
 
             void run();
 
+            bool is_live()
+            { return live_; }
+
             void signal_stop()
             { live_ = false; };
 
@@ -57,9 +60,9 @@ namespace kungfu
 
             bool has_location(uint32_t hash);
 
-            bool has_location(yijinjing::data::mode m, yijinjing::data::category c, const std::string &group, const std::string &name);
+            yijinjing::data::location_ptr get_location(uint32_t hash);
 
-            const yijinjing::data::location_ptr get_location(uint32_t hash);
+            bool has_writer(uint32_t dest_id);
 
             yijinjing::journal::writer_ptr get_writer(uint32_t dest_id);
 
@@ -80,7 +83,7 @@ namespace kungfu
 
             void require_read_from(uint32_t dest_id, int64_t trigger_time, uint32_t source_id, bool pub);
 
-            virtual void produce(const rx::subscriber<yijinjing::event_ptr> &sb);
+            void produce(const rx::subscriber<yijinjing::event_ptr> &sb);
 
             virtual bool produce_one(const rx::subscriber<yijinjing::event_ptr> &sb);
 
@@ -88,7 +91,9 @@ namespace kungfu
 
         private:
             yijinjing::io_device_with_reply_ptr io_device_;
-            bool live_ = true;
+            volatile bool live_ = true;
+
+            static void delegate_produce(hero *instance, const rx::subscriber<yijinjing::event_ptr> &sb);
         };
     }
 }

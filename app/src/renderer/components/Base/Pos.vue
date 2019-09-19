@@ -10,9 +10,9 @@
         <tr-dashboard-header-item>
             <i class="el-icon-download mouse-over" title="导出" @click="handleExport"></i>
         </tr-dashboard-header-item>
-        <tr-dashboard-header-item>
+        <!-- <tr-dashboard-header-item>
             <el-button size="mini" @click="makeOrderDialogVisiblity = true">下单</el-button>
-        </tr-dashboard-header-item>
+        </tr-dashboard-header-item> -->
     </div>
     <tr-table
         v-if="rendererTable"
@@ -109,32 +109,32 @@ export default {
                     prop: 'direction',
                     width: '50px'
                 },{
-                    type: 'text',
+                    type: 'number',
                     label: '昨',
                     prop: 'yesterdayVolume',
                     flex: 1
                 },{
-                    type: 'text',
+                    type: 'number',
                     label: '今',
                     prop: 'todayVolume',
                     flex: 1
                 },{
-                    type: 'text',
+                    type: 'number',
                     label: '总',
                     prop: 'totalVolume',
                     flex: 1
                 },{
-                    type: 'text',
-                    label: '开仓均价',
-                    prop: 'openPrice',
-                    flex: 1.2
+                    type: 'number',
+                    label: '开/持仓均价',
+                    prop: 'avgPrice',
+                    flex: 1.5
                 },{
-                    type: 'text',
+                    type: 'number',
                     label: '最新价',
                     prop: 'lastPrice',
                     flex: 1
                 },{
-                    type: 'text',
+                    type: 'number',
                     label: '浮动盈亏',
                     prop: 'unRealizedPnl',
                     flex: 1.2
@@ -157,19 +157,14 @@ export default {
         currentId(val) {
             const t = this;
             t.resetData();
-            if(!val) return;
-            t.rendererTable = false;
-            t.$nextTick().then(() => {
-                t.rendererTable = true;
-                t.init()
-            })
+            if(val) t.init();
         },
 
         filter:{
             deep: true,
             handler() {
                 const t = this;
-                t.currentId && t.init(true)
+                t.currentId && t.init()
             }
         },
 
@@ -178,6 +173,12 @@ export default {
             const t = this;
             if(!val || t.getDataLock) return
             t.dealNanomsg(val)
+        },
+
+         tradingDay() {
+            const t = this;
+            t.resetData();
+            if(t.currentId) t.init();
         }
 
     },
@@ -290,8 +291,8 @@ export default {
                     else if(item.unRealizedPnl < 0) return 'green'
                     break
                 case 'lastPrice':
-                    if(item.lastPrice > item.openPrice) return 'red'
-                    else if(item.lastPrice < item.openPrice) return 'green'
+                    if(item.lastPrice > item.avgPrice) return 'red'
+                    else if(item.lastPrice < item.avgPrice) return 'green'
                     break;
             }
         }

@@ -1,26 +1,87 @@
 
-from . import *
-from sqlalchemy import inspect
-import datetime
-import pyyjj
-from kungfu.data.sqlite.models import *
+import json
+from .models import *
+from itertools import groupby
+import kungfu.wingchun.finance as kwf
 from kungfu.wingchun.constants import *
-from kungfu.finance.position import *
-from kungfu.finance.ledger import *
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import not_
+from . import object_as_dict
+from . import make_url
 
-def make_url(locator, location, filename):
-    db_file = locator.layout_file(location, pyyjj.layout.SQLITE, filename)
-    return 'sqlite:///{}'.format(db_file)
+class SessionFactoryHolder:
+    def __init__(self, location, filename):
+        self.engine = create_engine(make_url(location, filename))
+        self.session_factory = sessionmaker(bind=self.engine)
 
-def object_as_dict(obj):
-    return {c.key: getattr(obj, c.key)
-            for c in inspect(obj).mapper.column_attrs}
+class AccountsDB(SessionFactoryHolder):
+    def __init__(self, location, filename):
+        super(AccountsDB, self).__init__(location, filename)
+        Account.metadata.create_all(self.engine)
 
-class DataProxy:
-    def __init__(self, url):
-        self.engine = create_engine(url)
+    def get_accounts(self):
+        with session_scope(self.session_factory) as session:
+            return [object_as_dict(obj) for obj in session.query(Account).all()]
+
+    def find_account(self, account_id):
+        with session_scope(self.session_factory) as session:
+            account = session.query(Account).filter(Account.account_id == account_id).first()
+            return object_as_dict(account) if account is not None else {}
+
+    def list_source_accounts(self, source_name):
+        with session_scope(self.session_factory) as session:
+            accounts = session.query(Account).filter(Account.source_name == source_name)
+            return [object_as_dict(obj) for obj in accounts]
+
+    def get_td_account_config(self, source_name, account_id):
+        with session_scope(self.session_factory) as session:
+            account = session.query(Account).\
+                filter(Account.source_name == source_name).\
+                filter(Account.account_id == account_id).first()
+            return json.dumps(object_as_dict(account)['config'])
+
+    def get_md_account_config(self, source_name):
+        with session_scope(self.session_factory) as session:
+            account = session.query(Account).\
+                filter(Account.source_name == source_name).\
+                filter(Account.receive_md).first()
+            return json.dumps(object_as_dict(account)['config'])
+
+    def reset_receive_md(self):
+        with session_scope(self.session_factory) as session:
+            for obj in session.query(Account):
+                obj.receive_md = False
+                session.merge(obj)
+
+    def add_account(self, **kwargs):
+        with session_scope(self.session_factory) as session:
+            session.merge(Account(**kwargs))
+
+    def delete_account(self, account_id):
+        with session_scope(self.session_factory) as session:
+            session.query(Account).filter(Account.account_id == account_id).delete()
+
+
+class CalendarDB(SessionFactoryHolder):
+    def __init__(self, location, filename):
+        super(CalendarDB, self).__init__(location, filename)
+
+    def get_holidays(self, region=Region.CN):
+        with session_scope(self.session_factory) as session:
+            return [obj.holiday for obj in session.query(Holiday).filter(Holiday.region == region).all()]
+
+
+class LedgerDB(SessionFactoryHolder):
+    def __init__(self, location, filename):
+        super(LedgerDB, self).__init__(location, filename)
         Base.metadata.create_all(self.engine)
-        self.session_factory = sessionmaker(bind = self.engine)
+
+    def on_messages(self, messages):
+        with session_scope(self.session_factory) as session:
+            for message in messages:
+                obj = self.object_from_msg(message)
+                session.merge(obj)
 
     def add_trade(self, **kwargs):
         with session_scope(self.session_factory) as session:
@@ -30,92 +91,90 @@ class DataProxy:
         with session_scope(self.session_factory) as session:
             session.merge(Order(**kwargs))
 
-    def get_holidays(self, region = Region.CN):
+    def get_order(self, order_id):
         with session_scope(self.session_factory) as session:
-            return [obj.holiday for obj in session.query(Holiday).filter(Holiday.region == region).all()]
+            order = session.query(Order).get(str(order_id))
+            return {} if order is None else object_as_dict(order)
+
+    def mark_orders_status_unknown(self, source_id, account_id):
+        with session_scope(self.session_factory) as session:
+            pending_orders = session.query(Order).filter(Order.account_id == account_id, not_(Order.status.in_(AllFinalOrderStatus))).all()
+            for order in pending_orders:
+                order.status = int(OrderStatus.Unknown)
+            return [object_as_dict(order) for order in pending_orders]
 
     def get_commission(self, account_id, instrument_id, exchange_id):
         pass
 
-    def get_margin_ratio(self, instrument_id, exchange_id, direction):
-        pass
-
-    def reset_instruments(self, instruments):
-        pass
-
-    def get_task_config(self, task_name):
+    def set_instruments(self, instruments):
         with session_scope(self.session_factory) as session:
-            task = session.query(Task).get(task_name)
-            if task:
-                return task.config
-            else:
-                return {}
+            session.query(FutureInstrument).delete()
+            objects = [FutureInstrument(**inst) for inst in instruments]
+            session.bulk_save_objects(objects)
 
-    def set_task_config(self, task_name, config):
+    def get_instrument_info(self, instrument_id):
         with session_scope(self.session_factory) as session:
-            task = session.query(Task).get(task_name)
-            if task is None:
-                task = Task(name=task_name, config=config)
-                session.add(task)
-            else:
-                task.config = config
+            obj = session.query(FutureInstrument).filter(FutureInstrument.instrument_id == instrument_id).first()
+            return {} if obj is None else object_as_dict(obj)
 
-class LedgerHolder(DataProxy):
-    def __init__(self, url):
-        super(LedgerHolder, self).__init__(url)
-
-    def get_model_cls(self, msg_type, ledger_category):
-        cls = None
-        if msg_type == int(MsgType.AssetInfo):
-            if ledger_category == int(LedgerCategory.Account):
-                cls = AccountAssetInfo
-            elif ledger_category == int(LedgerCategory.Portfolio):
-                cls = PortfolioAssetInfo
-            elif ledger_category == int(LedgerCategory.SubPortfolio):
-                cls = SubPortfolioAssetInfo
-        elif msg_type == int(MsgType.Position):
-            if ledger_category == int(LedgerCategory.Account):
-                cls = AccountPosition
-            elif ledger_category == int(LedgerCategory.Portfolio):
-                cls =  PortfolioPosition
-            elif ledger_category == int(LedgerCategory.SubPortfolio):
-                cls = SubPortfolioPosition
-        elif msg_type == int(MsgType.AssetInfoSnapshot):
-            if ledger_category == int(LedgerCategory.Account):
-                cls = AccountAssetInfoSnapshot
-            elif ledger_category == int(LedgerCategory.Portfolio):
-                cls = PortfolioAssetInfoSnapshot
-        return cls
-
-    def process_message(self, session, message):
-        msg_type = message["msg_type"]
-        category = message["data"].pop("ledger_category")
-        cls = self.get_model_cls(msg_type, category)
-        if cls is not None:
-            obj = cls(**message["data"])
-            session.merge(obj)
-            if isinstance(obj, PositionMixin) and obj.volume == 0:
-                session.delete(obj)
-
-    def on_messages(self, messages):
+    def all_instrument_infos(self):
         with session_scope(self.session_factory) as session:
-            for message in messages:
-                self.process_message(session, message)
+            objs = session.query(FutureInstrument).all()
+            return [object_as_dict(obj) for obj in objs]
 
-    def load(self, ledger_category, account_id = None, client_id = None):
-        asset_info_cls = self.get_model_cls(int(MsgType.AssetInfo), int(ledger_category))
-        position_cls = self.get_model_cls(int(MsgType.Position), int(ledger_category))
+    def drop(self, session, book_tags):
+        for cls in [Asset, Position, PositionDetail]:
+            session.query(cls).filter(cls.source_id==book_tags.source_id, cls.account_id == book_tags.account_id, cls.client_id == book_tags.client_id,cls.ledger_category == int(book_tags.ledger_category)).delete()
+
+    def load(self, ctx, book_tags):
         with session_scope(self.session_factory) as session:
-            asset_info = session.query(asset_info_cls).filter(asset_info_cls.account_id == account_id, asset_info_cls.client_id == client_id).first()
-            if asset_info is None:
+            asset_obj = session.query(Asset).filter(Asset.source_id==book_tags.source_id,
+                                                    Asset.account_id==book_tags.account_id,
+                                                    Asset.client_id ==book_tags.client_id,
+                                                    Asset.ledger_category==int(book_tags.ledger_category)).first()
+            if not asset_obj:
                 return None
             else:
-                asset_info = object_as_dict(asset_info)
-                asset_info["trading_day"] = datetime.datetime.strptime(asset_info["trading_day"], "%Y%m%d")
-                positions = {}
-                for obj in session.query(position_cls).filter(position_cls.account_id == account_id, position_cls.client_id == client_id).all():
-                    cls = StockPosition if get_instrument_type(obj.instrument_id, obj.exchange_id) == InstrumentType.Stock else FuturePosition
-                    positions[get_symbol_id(obj.instrument_id, obj.exchange_id)] = cls(**object_as_dict(obj))
-                args = {"positions": positions, "ledger_category": ledger_category}
-                args.update(asset_info)
-                return Ledger(**args)
+                args = object_as_dict(asset_obj)
+                pos_objs = session.query(Position).filter(Position.source_id==book_tags.source_id,
+                                                          Position.account_id==book_tags.account_id,
+                                                          Position.client_id==book_tags.client_id,
+                                                          Position.ledger_category==int(book_tags.ledger_category)).all()
+                detail_objs = session.query(PositionDetail).filter(PositionDetail.source_id==book_tags.source_id,
+                                                                   PositionDetail.account_id==book_tags.account_id,
+                                                                   PositionDetail.client_id==book_tags.client_id,
+                                                                   PositionDetail.ledger_category==int(book_tags.ledger_category)).all()
+                detail_dicts = [ object_as_dict(detail) for detail in detail_objs]
+                pos_dicts = [object_as_dict(pos) for pos in pos_objs]
+                for pos in pos_dicts:
+                    pos.update({"details": detail_dicts})
+                args.update({"positions": pos_dicts, "tags": book_tags})
+                return kwf.book.AccountBook(ctx=ctx, **args)
+
+    def dump(self, book):
+        with session_scope(self.session_factory) as session:
+            self.drop(session, book.tags)
+            messages = book.detail_messages
+            objects = [self.object_from_msg(message) for message in messages]
+            session.bulk_save_objects(objects)
+
+    def remove(self,book_tags):
+        with session_scope(self.session_factory) as session:
+            self.drop(session, book_tags)
+
+    def get_model_cls(self, msg_type):
+        if msg_type == MsgType.Asset:
+            return Asset
+        elif msg_type == MsgType.Position:
+            return Position
+        elif msg_type == MsgType.PositionDetail:
+            return PositionDetail
+        elif msg_type == MsgType.AssetSnapshot:
+            return AssetSnapshot
+        else:
+            raise ValueError('could not find class for msg_type {}'.format(msg_type))
+
+    def object_from_msg(self, message):
+        cls =  self.get_model_cls(message["msg_type"])
+        return cls(**message["data"])
+

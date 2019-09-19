@@ -4,7 +4,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
 const electron = require('electron');
 //base setting, init db
 const { initDB } = require('./base');
-const { killGodDaemon,  killExtra, killKfc } = require('__gUtils/processUtils');
+const { killGodDaemon,  killExtra, killKfc, killKungfu } = require('__gUtils/processUtils');
 const { logger } = require('__gUtils/logUtils');
 const { platform } = require('__gConfig/platformConfig');
 
@@ -19,7 +19,8 @@ function createWindow () {
 		{
 			label: "Application",
 			submenu: [
-				{ label: "Quit", accelerator: "Command+Q", click: function() { app.quit(); }}
+				{ label: "Quit", accelerator: "Command+Q", click: function() { app.quit(); }},
+				{ label: "Close", accelerator: "CmdOrCtrl+W", click: function() { console.log(BrowserWindow.getFocusedWindow().close()); }}
 			]
 		}, 
 		{
@@ -36,7 +37,7 @@ function createWindow () {
 	
 	// Create the browser window.
 	const electronScreen = electron.screen;    
-	const {width,height} = electronScreen.getPrimaryDisplay().size
+	const { width,height } = electronScreen.getPrimaryDisplay().size
 	mainWindow = new BrowserWindow({
 		show: false,
 		width,
@@ -57,14 +58,14 @@ function createWindow () {
 	}
 
 	// Open the DevTools.
-	mainWindow.webContents.openDevTools()
+	// mainWindow.webContents.openDevTools()
 
 	// // Emitted when the window is closed.
 	mainWindow.on('close', (e) => {
 	// Dereference the window object, usually you would store windows
 	// in an array if your app supports multi windows, this is the time
 	// when you should delete the corresponding element.
-		if (platform === 'win' && !allowQuit) {
+		if (platform !== 'mac' && !allowQuit) {
 			showQuitMessageBox();	
 			e.preventDefault();
 		}
@@ -88,7 +89,7 @@ function createWindow () {
 
 	//create db
 	initDB()
-	if(platform === 'win') updateHandler(mainWindow)
+	// if(platform === 'win') updateHandler(mainWindow)
 }
 
 
@@ -107,14 +108,14 @@ if(!gotTheLock) {
 }
 
 
+
 var appReady = false, killExtraFinished = false;
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', () => {
 	appReady = true;
-	createWindow()
-	// if(appReady && killExtraFinished) createWindow()
+	if(appReady && killExtraFinished) createWindow()
 })
 
 //一上来先把所有之前意外没关掉的 pm2/kfc 进程kill掉
@@ -123,10 +124,9 @@ killExtra()
 .catch(err => console.error(err))
 .finally(() => {
 	killExtraFinished = true;
-	// if(appReady && killExtraFinished) createWindow()
+	if(appReady && killExtraFinished) createWindow()
 	console.timeEnd('finish kill extra')
 })
-
 
 // Quit when all windows are closed.
 app.on('window-all-closed', function (e) {
@@ -143,8 +143,17 @@ app.on('activate', function () {
     else mainWindow.show()
 })
 
-app.on('will-quit', (e) => {
+app.on('will-quit', async (e) => {
 	if(allowQuit) return
+	if(process.env.APP_TYPE === 'test') {
+		try {
+			await KillAll()
+		} catch (err) {
+			console.error(err)
+		}
+		app.quit()
+		return;
+	}
 	if (platform === 'mac') showQuitMessageBox();
 	e.preventDefault()
 })
@@ -161,15 +170,16 @@ function showQuitMessageBox(){
 		defaultId: 0,
 		cancelId: 1,
 		message: "退出应用会结束所有交易进程，确认退出吗？",
-		buttons: ['确认', `最小化至${platform === 'win' ? '任务栏' : ' Dock'}`],
+		buttons: ['确认', `最小化至${platform !== 'mac' ? '任务栏' : ' Dock'}`],
 		icon: path.join(__resources, 'icon', 'icon.png')
 	}, (index) => {
 		if(index === 0){
 			KillAll().then(() => app.quit())
 		}else{
 			if((mainWindow !== null) && !mainWindow.isDestroyed()){
-				if(platform === 'win') mainWindow.minimize();
+				// if(platform === 'win') mainWindow.minimize();
 				if(platform === 'mac') mainWindow.hide();
+				else mainWindow.minimize();
 			}
 		}
 	})
@@ -185,6 +195,7 @@ function KillAll(){
 		.catch(err => console.error(err)) 
 		.finally(() => {
 			console.timeEnd('kill kfcs');
+			if(platform === 'linux') killKungfu()
 			console.time('kill daemon');
 			killGodDaemon()
 			.catch(err => console.error(err)) 				

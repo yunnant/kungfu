@@ -10,14 +10,14 @@
 
 #define LOG_LEVEL_ENV "KF_LOG_LEVEL"
 #define DEFAULT_LOG_LEVEL_NAME "info"
-#define DEFAULT_LOG_PATTERN "[%Y-%m-%d %T.%F] [%^%=8l%$] [pid/tid %6P/%-6t] [%@#%!] %v"
+#define DEFAULT_LOG_PATTERN "[%m/%d %T.%F] [%^%=8l%$] [%6P/%-6t] [%@#%!] %v"
 
 namespace kungfu {
 
     namespace yijinjing {
 
         namespace log {
-            spdlog::level::level_enum get_env_log_level();
+            spdlog::level::level_enum get_env_log_level(const data::locator_ptr &locator);
 
             const std::string& setup_log(data::location_ptr location, const std::string &name);
 

@@ -2,8 +2,10 @@ import os
 import shutil
 import glob
 import re
+import json
 import pyyjj
 import pandas as pd
+import kungfu.yijinjing.msg as yjj_msg
 
 
 os_sep = re.escape(os.sep)
@@ -48,10 +50,23 @@ def find_category(c):
     return pyyjj.category.SYSTEM
 
 
+def get_location_from_json(ctx, data):
+    if 'mode' in data and 'category' in data and 'group' in data and 'name' in data:
+        return pyyjj.location(MODES[data['mode']], CATEGORIES[data['category']], data['group'], data['name'], ctx.locator)
+    else:
+        return None
+
+
 class Locator(pyyjj.locator):
     def __init__(self, home):
         pyyjj.locator.__init__(self)
         self._home = home
+
+    def has_env(self, name):
+        return os.getenv(name) is not None
+
+    def get_env(self, name):
+        return os.getenv(name)
 
     def layout_dir(self, location, layout):
         mode = pyyjj.get_mode_name(location.mode)
@@ -86,6 +101,7 @@ class Locator(pyyjj.locator):
 
 
 def collect_journal_locations(ctx):
+
     search_path = os.path.join(ctx.home, ctx.category, ctx.group, ctx.name, 'journal', ctx.mode, '*.journal')
 
     locations = {}
@@ -158,7 +174,7 @@ def find_sessions_from_reader(ctx, sessions_df, reader, mode, category, group, n
     while reader.data_available():
         frame = reader.current_frame()
         frame_count = frame_count + 1
-        if frame.msg_type == 10001:
+        if frame.msg_type == yjj_msg.SessionStart:
             if session_start_time > 0:
                 sessions_df.loc[len(sessions_df)] = [
                     ctx.session_count, mode, category, group, name,
@@ -170,7 +186,7 @@ def find_sessions_from_reader(ctx, sessions_df, reader, mode, category, group, n
             else:
                 session_start_time = frame.trigger_time
             frame_count = 1
-        elif frame.msg_type == 10002:
+        elif frame.msg_type == yjj_msg.SessionEnd:
             if session_start_time > 0:
                 sessions_df.loc[len(sessions_df)] = [
                     ctx.session_count, mode, category, group, name,
@@ -219,6 +235,10 @@ def trace_journal(ctx, session_id, io_type):
             reader.join(home, dest_id, session['begin_time'])
 
     if (io_type == 'in' or io_type == 'all') and not (home.category == pyyjj.category.SYSTEM and home.group == 'master' and home.name == 'master'):
+        master_home_uid = pyyjj.hash_str_32('system/master/master/live')
+        master_home_location = make_location_from_dict(ctx, locations[master_home_uid])
+        reader.join(master_home_location, 0, session['begin_time'])
+
         master_cmd_uid = pyyjj.hash_str_32('system/master/{:08x}/live'.format(location['uid']))
         master_cmd_location = make_location_from_dict(ctx, locations[master_cmd_uid])
         reader.join(master_cmd_location, location['uid'], session['begin_time'])
@@ -231,9 +251,15 @@ def trace_journal(ctx, session_id, io_type):
             'public' if frame.dest == 0 else locations[frame.dest]['uname'],
             frame.msg_type, frame.frame_length, frame.data_length
         ]
-        if frame.dest == home.uid and (frame.msg_type == 10021 or frame.msg_type == 10022):
+        if frame.dest == home.uid and (frame.msg_type == yjj_msg.RequestReadFrom or frame.msg_type == yjj_msg.RequestReadFromPublic):
             request = pyyjj.get_RequestReadFrom(frame)
             source_location = make_location_from_dict(ctx, locations[request.source_id])
-            reader.join(source_location, location['uid'] if frame.msg_type == 10021 else 0, request.from_time)
+            try:
+                reader.join(source_location, location['uid'] if frame.msg_type == yjj_msg.RequestReadFrom else 0, request.from_time)
+            except Exception as err:
+                ctx.logger.error("failed to join journal {}/{}, exception: {}".format(source_location.uname, location['uid'] if frame.msg_type == yjj_msg.RequestReadFrom else 0), err)
+        if frame.dest == home.uid and frame.msg_type == yjj_msg.Deregister:
+            loc = json.loads(frame.data_as_string())
+            reader.disjoin(loc['uid'])
         reader.next()
     return trace_df

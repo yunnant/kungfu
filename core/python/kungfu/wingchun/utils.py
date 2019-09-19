@@ -1,23 +1,35 @@
 
 import pywingchun
 from kungfu.wingchun.constants import *
-def to_dict(obj):
+
+def object_as_dict(obj):
     d = {}
     for attr in dir(obj):
         if not attr.startswith('__'):
-            if attr == "order_id" or attr == "parent_id" or attr == "parent_order_id" or attr == "trade_id":
-                d[attr] = str(getattr(obj, attr))
-            elif attr in ["price_type", "instrument_type", "offset", "status", "side", "direction", "time_condition", "volume_condition"]:
-                d[attr] = int(getattr(obj, attr))
+            value = getattr(obj, attr)
+            if type(value) in [InstrumentType, Side, Offset, OrderStatus, Direction, PriceType, VolumeCondition, TimeCondition, LedgerCategory]:
+                d[attr] = int(value)
             else:
-                d[attr] = getattr(obj, attr)
+                d[attr] = value
     return d
 
-def get_instrument_type(instrument_id, exchange_id):
-    if exchange_id == Exchange.SSE or exchange_id == Exchange.SZE:
-        return InstrumentType.Stock
-    else:
-        return InstrumentType.Future
+def is_final_status(order_status):
+    return int(order_status) in AllFinalOrderStatus
 
+def get_position_effect(instrument_type, side, offset):
+    if instrument_type == InstrumentType.Stock:
+        return Direction.Long
+    elif side == Side.Buy and offset == Offset.Open:
+        return Direction.Long
+    elif side == Side.Sell and (offset == Offset.Close or offset == Offset.CloseToday or offset == Offset.CloseYesterday):
+        return Direction.Long
+    elif side == Side.Sell and offset == Offset.Open:
+        return Direction.Short
+    elif side == Side.Buy and (offset == Offset.Close or offset == Offset.CloseToday or offset == Offset.CloseYesterday):
+        return Direction.Short
+    else:
+        raise ValueError('could not find position effect for instrument_type {}, side {}, offset {}'.format(instrument_type, side, offset))
+
+get_instrument_type = pywingchun.utils.get_instrument_type
 is_valid_price = pywingchun.utils.is_valid_price
 get_symbol_id = pywingchun.utils.get_symbol_id

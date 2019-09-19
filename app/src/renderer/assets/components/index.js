@@ -12,9 +12,12 @@ import TrDashboard from './tr/TrDashboard.vue';
 import TrDashboardHeaderItem from './tr/TrDashboardHeaderItem.vue';
 import TrTable from './tr/TrTable.vue';
 import TrSearchInput from './tr/TrSearchInput.vue';
+import TrSettingDashboard from './tr/TrSettingDashboard.vue';
 
 import MainContent from '@/components/Layout/MainContent';
 import PopFrame from '@/components/Layout/PopFrame';
+
+import { buildTask } from '__gUtils/busiUtils';
 
 const components = [
     TrNoData,
@@ -33,10 +36,11 @@ const components = [
     TrPnl,
     TrTable,
     TrSearchInput,
+    TrSettingDashboard
 ]
 
 //导出
-const {dialog} = require('electron').remote;
+const { dialog } = require('electron').remote;
 const saveFile = ({
     title, filters
 }) => {
@@ -56,21 +60,44 @@ const saveFile = ({
     })
 }
 
+//显示log
+const BrowserWindow = require('electron').remote.BrowserWindow;
+const showLog = (logPath) => {
+    buildTask(
+        'showLog', 
+        BrowserWindow.getFocusedWindow(), 
+        BrowserWindow,
+        {
+            width: 600,
+            height: 800,
+            show: true
+        }    
+    ).then(({ win, curWinId }) => {
+        win.webContents.send('show-log', {
+            winId: curWinId,
+            logPath
+        });
+    })
+}
+
+
 export default function (Vue) {
     components.map(component => {
         Vue.component(component.name, component)
     })
 
     Vue.saveFile = Vue.prototype.$saveFile = saveFile;
+    Vue.showLog = Vue.prototype.$showLog = showLog;
 
     //message 换
     const Message = {
-        error: function(message){
+        error: function(message, duration){
             Vue.notify({
                 title: '错误',
                 message: message,
                 position: "bottom-right",
-                type: 'error'
+                type: 'error',
+                duration: duration === 0 ? 0 : 4500
             })
         },
         warning: function(message){

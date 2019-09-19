@@ -33,10 +33,10 @@
 <script>
 import { mapState } from 'vuex'
 import moment from 'moment'
-import { debounce, throttle, throttleInsert, dealLogMessage } from '__gUtils/busiUtils'
+import { debounce, throttle, throttleInsert, dealLogMessage, buildTask } from '__gUtils/busiUtils'
 import { buildProcessLogPath } from '__gConfig/pathConfig';
 import { Tail } from 'tail';
-import { clearFileContent, addFile, openReadFile, existsSync } from '__gUtils/fileUtils';
+import { clearFileContent, addFile, existsSync } from '__gUtils/fileUtils';
 import { ipcRenderer } from 'electron';
 import { platform } from '__gConfig/platformConfig';
 const BrowserWindow = require('electron').remote.BrowserWindow;
@@ -45,6 +45,15 @@ const BrowserWindow = require('electron').remote.BrowserWindow;
 export default {
     name: 'log',
     data() {
+        this.logColor = {
+            info: 'green',
+            trace: '',
+            error: 'red',
+            warning: 'yellow',
+            debug: 'blue',
+            critical: 'red'
+        }
+
         this.schema = [
             {
                 label: '时间',
@@ -99,6 +108,11 @@ export default {
                 t.rendererTable = true;
                 t.init(t.processId, t.logPath)
             })
+        },
+
+        ifScrollToBottom(val){
+            const t = this;
+            if(t.ifScrollToBottom) t.scrollToBottom()
         }
     },
 
@@ -135,7 +149,7 @@ export default {
         },
 
         handleOpenLogFile(logPath){
-            openReadFile(logPath);
+            this.$showLog(logPath)
         },
 
         handleRefresh(){
@@ -165,7 +179,16 @@ export default {
         getLogByTask(logPath, searchKeyword){
             const t = this;
             return new Promise((resolve, reject) => {
-                t.$utils.buildTask('getStrategyLog', BrowserWindow.getFocusedWindow(), BrowserWindow).then(({ win, curWinId }) => {
+                buildTask(
+                    'getStrategyLog', 
+                    BrowserWindow.getFocusedWindow(),
+                    BrowserWindow,
+                    // {
+                    //     width: 800,
+                    //     height: 600,
+                    //     show: true
+                    // }
+                ).then(({ win, curWinId }) => {
                     win.webContents.send('get-strategy-log', {
                         winId: curWinId,
                         logPath,
@@ -179,11 +202,9 @@ export default {
             })
         },
 
-
         //开始监听日志尾部
         startWatchingTail(processId, logPath, searchKeyword){
             const t = this;
-            let timer = null;
             let logWaitList = [];
             let throttleInsertLog = throttleInsert(500)
             let throttleClearLog = throttle(() => {
@@ -193,10 +214,10 @@ export default {
                 
             t.tailObserver = new Tail(logPath, {
                 flushAtEOF: true,
-                useWatchFile: platform === 'mac',
+                useWatchFile: true,
                 follow: true,
             });   
-            t.tailObserver.watch();    
+            t.tailObserver.watch();  
             t.tailObserver.on('line', line => ((curProcId, curKw) => {
                 if(curKw) return;
                 if(curProcId !== processId) return;
@@ -204,9 +225,9 @@ export default {
                 throttleInsertLog(logData).then(logList => {
                     if(!logList) return;
                     t.tableData = t.pushTableData(logList);
+                    if(t.ifScrollToBottom) t.scrollToBottom()
                 })
                 throttleClearLog()
-                if(t.ifScrollToBottom) t.scrollToBottom()
             })(processId, searchKeyword))
 
             t.tailObserver.on('error', err => {
@@ -250,7 +271,6 @@ export default {
         //加载完数据
         scrollToBottom: throttle(function() {
             const t = this;
-            if(!t.$refs['logTable']) return;
             const $logTable = t.$refs['logTable'];
             if(!$logTable) return;
             t.$nextTick().then(() => { 
@@ -260,11 +280,13 @@ export default {
 
         renderCellClass(prop, item){
             const t = this;
-            if(item.type === 'error'){
-                return 'red'
-            }else{
-                return ''
+            if(prop === 'type') {
+                return t.logColor[item.type] || ''
             }
+            if(item.type === 'error' || item.type === 'critical') {
+                return t.logColor[item.type]
+            }
+            
         },
     }
 }

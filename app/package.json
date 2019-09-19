@@ -1,31 +1,35 @@
 {
   "name": "kungfu",
-  "author": "taurus.ai",
   "version": "2.0.0",
   "description": "KungFu Trader App",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/taurusai/kungfu",
+  "author": {
+    "name": "taurus.ai",
+    "email": "info@taurus.ai"
+  },
   "config": {
     "pyver": "three",
     "cmakejsopt": ""
   },
   "main": "./dist/app/main.js",
   "engines": {
-    "node": ">8.0.0"
+    "node": ">=8.0.0 <11.0.0"
   },
   "scripts": {
     "install-deps": "electron-builder install-app-deps",
     "clean": "rimraf ./dist/* ./build/*",
     "build:install": "electron-builder",
     "build": "node --max_old_space_size=8192 .electron-kungfu/build.js && electron-builder",
-    "build:dist": "yarn run dist:main && yarn run dist:render && electron-builder",
     "dev": "node .electron-kungfu/dev-runner.js",
+    "dist": "yarn run dist:main && yarn run dist:render",
     "dist:main": "cross-env NODE_ENV=production node --max_old_space_size=8192 ../node_modules/webpack/bin/webpack.js --progress --colors --config .electron-kungfu/webpack.main.config.js",
     "dist:render": "cross-env NODE_ENV=production node --max_old_space_size=8192 ../node_modules/webpack/bin/webpack.js --progress --colors --config .electron-kungfu/webpack.renderer.config.js",
-    "test": "mocha"
+    "test": " mocha"
   },
   "build": {
-    "productName": "Kungfu.Trader",
-    "artifactName": "${productName}-${version}.${ext}",
+    "productName": "Kungfu",
+    "artifactName": "${productName}-${buildVersion}-${os}-${arch}-${channel}.${ext}",
     "appId": "taurus.ai.KungFu.Trader",
     "directories": {
       "output": "build/app"
@@ -42,33 +46,35 @@
         "from": ".",
         "to": "dist/app",
         "filter": [
-          "resources"
-        ]
-      },
-      {
-        "from": "../core/cpp/wingchun/resources",
-        "to": "dist/app/resources/default",
-        "filter": [
-          "commission.db",
-          "holidays.db"
+          "resources",
+          "!default/*"
         ]
       },
       "!**/kungfu-core/*",
       "!**/kungfu-core/**/*",
       "!**/kungfu-core/**/**/*",
-      "!**/kungfu-core/**/**/*",
-      "!**/kungfu-core/build/kfc/**/*",
-      "**/kungfu-core/package.json",
       "**/kungfu-core/build/*/node_nanomsg.node",
       "**/kungfu-core/build/*/node_sqlite3.node",
       "**/kungfu-core/build/*/libnanomsg.*",
       "**/kungfu-core/build/*/nanomsg.*",
-      "**/kungfu-core/node/*"
+      "**/kungfu-core/node/*",
+      "**/kungfu-core/package.json"
     ],
     "extraResources": [
       {
         "from": "../core/build/kfc",
-        "to": "kfc"
+        "to": "kfc",
+        "filter": [
+          "!**/btdata"
+        ]
+      },
+      {
+        "from": "./resources",
+        "to": "kungfu-resources",
+        "filter": [
+          "default/*",
+          "config/*"
+        ]
       }
     ],
     "asar": false,
@@ -90,23 +96,20 @@
     "mac": {
       "icon": "./resources/logo/icon.icns",
       "type": "distribution",
-      "target": [
-        "dmg"
-      ]
+      "target": ["dmg"]
     },
     "win": {
       "icon": "./resources/logo/icon.ico",
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         }
       ]
     },
     "linux": {
-      "icon": "./resources/logo"
+      "icon": "./resources/logo/icn.icns",
+      "target": ["rpm"]
     },
     "nsis": {
       "oneClick": false,
@@ -123,10 +126,11 @@
     "@babel/polyfill": "^7.2.5",
     "bindings": "^1.5.0",
     "electron-updater": "^4.0.6",
+    "kungfu-core": "2.0.0",
     "fkill": "^6.1.0",
     "fs-extra": "^7.0.1",
+    "gaze": "^1.1.3",
     "getprocesses": "^1.1.1",
-    "kungfu-core": "^2.0.0",
     "log4js": "^4.0.2",
     "pm2": "^3.5.0",
     "tail": "^2.0.2",
@@ -158,9 +162,9 @@
     "css-loader": "^2.1.1",
     "del": "^3.0.0",
     "devtron": "^1.4.0",
-    "electron": "5.0.7",
-    "electron-chromedriver": "^5.0.1",
+    "electron": "5.0.10",
     "electron-builder": "^20.38.5",
+    "electron-chromedriver": "^5.0.1",
     "electron-debug": "^1.4.0",
     "electron-devtools-installer": "^2.2.0",
     "element-ui": "2.8.2",

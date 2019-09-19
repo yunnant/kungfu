@@ -5,10 +5,10 @@
                 <tr-search-input v-model.trim="accountIdKey"></tr-search-input>
             </tr-dashboard-header-item>
             <tr-dashboard-header-item>
-                <el-button size="mini" @click="handleAddAccount" title="添加">添加</el-button>
+                <el-button size="mini" @click="handleAddAccount" title="添加" id="add-account-btn">添加</el-button>
             </tr-dashboard-header-item>
         </div>
-        <div class="table-body">
+        <div class="table-body accounts-table">
             <el-table
                 v-if="renderTable"
                 size="small"
@@ -23,7 +23,7 @@
                     show-overflow-tooltip
                 >
                     <template slot-scope="props">
-                        {{props.row.account_id.toAccountId()}}
+                        <span :class="props.row.account_id">{{props.row.account_id.toAccountId()}}</span> 
                     </template>
                 </el-table-column>
                 <el-table-column
@@ -32,8 +32,8 @@
                     >
                     <template slot-scope="props">
                         <el-tag
-                        v-if="(config[props.row.source_name] || {}).typeName"
-                        :type="config[props.row.source_name].type" 
+                        v-if="(accountSource[props.row.source_name] || {}).typeName"
+                        :type="accountSource[props.row.source_name].type" 
                         >
                             {{props.row.source_name}}
                         </el-tag>
@@ -65,6 +65,7 @@
                 <el-table-column
                     label="实现盈亏"
                     show-overflow-tooltip
+                    align="right"
                     >
                     <template slot-scope="props">
                         <span :class="{
@@ -78,6 +79,7 @@
                 <el-table-column
                     label="浮动盈亏"
                     show-overflow-tooltip
+                    align="right"
                     >
                     <template slot-scope="props">
                         <span :class="{
@@ -91,9 +93,10 @@
                 <el-table-column
                     label="市值/保证金"
                     show-overflow-tooltip
+                    align="right"
                     >
                     <template slot-scope="props" >
-                        <template v-if="(config[props.row.source_name] || {}).typeName == 'future'">
+                        <template v-if="(accountSource[props.row.source_name] || {}).typeName == 'future'">
                             {{$utils.toDecimal((accountsAsset[props.row.account_id] || {}).margin) + '' || '--'}}
                         </template>
                         <!-- market_value -->
@@ -105,6 +108,7 @@
                 <el-table-column
                     label="可用资金"
                     show-overflow-tooltip
+                    align="right"
                     >
                         <template slot-scope="props">
                         {{$utils.toDecimal((accountsAsset[props.row.account_id] || {}).avail) + '' || '--'}}
@@ -113,13 +117,13 @@
                 <el-table-column
                     label=""
                     align="right"
-                    min-width="100"
+                    min-width="140"
                 >
                     <template slot-scope="props">
                         <span class="tr-oper" @click.stop="handleOpenLogFile(props.row)"><i class="el-icon-document mouse-over" title="打开日志文件"></i></span>
                         <span class="tr-oper" @click.stop="handleOpenFeeSettingDialog(props.row)"><i class="el-icon-money mouse-over" title="费率设置"></i></span>
                         <span class="tr-oper" @click.stop="handleOpenUpdateAccountDialog(props.row)"><i class="el-icon-setting mouse-over" title="账户设置"></i></span>
-                        <span class="tr-oper-delete" @click.stop="handleDeleteAccount(props.row)"><i class=" el-icon-delete mouse-over" title="删除账户"></i></span>
+                        <span :class="['tr-oper-delete', `delete-${props.row.account_id}`] " @click.stop="handleDeleteAccount(props.row)"><i class=" el-icon-delete mouse-over" title="删除账户"></i></span>
                     </template>
                 </el-table-column>
             </el-table>
@@ -128,11 +132,13 @@
             <el-dialog title="选择柜台" 
             width="400px" 
             :visible.sync="visiblity.selectSource"
+            id="select-source-dialog"
+            @keyup.enter.native="handleSelectSource"
             >
                     <el-radio-group v-model.trim="selectedSource" style="width: 100%">
                         <el-row>
-                            <el-col :span="12" v-for="item of Object.values(config)" :key="item.platform">
-                                <el-radio :label="item.source" :disabled="ifSourceDisable[item.source.toLowerCase()]">
+                            <el-col :span="12" v-for="item of Object.values(accountSource || {})" :key="item.source" :class="`source-${item.source}`">
+                                <el-radio :label="item.source">
                                     {{item.source.toUpperCase()}}
                                     <el-tag
                                     v-if="item.typeName"
@@ -146,7 +152,7 @@
                     </el-radio-group>
                 <div slot="footer" class="dialog-footer">
                     <el-button @click="handleCloseSelectSource" size="mini">取 消</el-button>
-                    <el-button type="primary" size="mini" @click="handleSelectSource">确 定</el-button>
+                    <el-button type="primary" size="mini" @click="handleSelectSource" id="confirm-select-source-btn">确 定</el-button>
                 </div>
             </el-dialog>
 
@@ -166,7 +172,7 @@
             <SetFeeDialog
             v-if="visiblity.setFee"
             :visible.sync="visiblity.setFee"
-            :accountType="(config[feeAccount.source_name] || {}).typeName"
+            :accountType="(accountSource[feeAccount.source_name] || {}).typeName"
             :accountId="feeAccount.account_id"
             :setFeeSettingData="setFeeSettingData"
             :getFeeSettingData="getFeeSettingData"
@@ -178,13 +184,11 @@
 import { mapState, mapGetters } from 'vuex';
 import { debounce } from '__gUtils/busiUtils';
 import * as ACCOUNT_API from '__io/db/account';
-import * as BASE_API from '__io/db/base';
-import {accountSource, sourceType, ifSourceDisable} from '__gConfig/accountConfig';
 import SetAccountDialog from './SetAccountDialog';
 import SetFeeDialog from './SetFeeDialog';
 import { deleteProcess } from '__gUtils/processUtils';
 import { TD_DIR, LOG_DIR } from '__gConfig/pathConfig';
-import { removeFileFolder, openReadFile } from "__gUtils/fileUtils";
+import { removeFileFolder } from "__gUtils/fileUtils";
 import { deleteAccount, switchTd } from '__io/actions/account';
 
 import path from 'path'
@@ -192,8 +196,6 @@ export default {
     name: 'account',
 
     data() {
-        this.config = sourceType;
-        this.ifSourceDisable = ifSourceDisable;
         return {
             accountIdKey: '',
             selectedExecutor: '',
@@ -223,6 +225,7 @@ export default {
 
     computed:{
         ...mapState({
+            accountSource: state => state.BASE.accountSource || {},
             mdTdState: state => state.ACCOUNT.mdTdState,
             accountsAsset: state => state.ACCOUNT.accountsAsset,
             accountList: state => state.ACCOUNT.accountList, 
@@ -259,7 +262,9 @@ export default {
     methods:{
         //添加账户，打开选择柜台弹窗
         handleAddAccount(){
-            this.visiblity.selectSource = true
+            this.visiblity.selectSource = true;
+            this.$store.dispatch('getAccountSourceConfig')
+     
         },
 
         //编辑账户
@@ -320,7 +325,7 @@ export default {
             //是否是该柜台下的第一个账户记住，行情自动选中
             t.sourceFirstAccount = -1 === t.accountList.findIndex(item => (item.source_name == t.selectedSource))
             // 加上某些参数的默认值
-            accountSource[t.selectedSource].map(item => {
+            t.accountSource[t.selectedSource].config.map(item => {
                 if(item.default !== undefined) {
                     t.accountForm[item.key] = item.default
                 }
@@ -359,7 +364,7 @@ export default {
         //打开日志
         handleOpenLogFile(row){
             const logPath = path.join(LOG_DIR, `td_${row.account_id}.log`);
-            openReadFile(logPath)
+            this.$showLog(logPath)
         },
 
         //获取账户列表

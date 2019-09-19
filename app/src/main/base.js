@@ -1,14 +1,13 @@
 import initGlobalDB from '__gConfig/initGlobalDB.json'
-import { BASE_DB_DIR } from '__gConfig/pathConfig';
+import { BASE_DB_DIR, DEFUALT_DB_PATH } from '__gConfig/pathConfig';
 import { logger } from '__gUtils/logUtils'
 import { existsSync, addFile } from '__gUtils/fileUtils';
 const path = require('path')
 const fse = require('fs-extra');
 const sqlite3 = require('kungfu-core').sqlite3.verbose();
 
-;if (process.env.NODE_ENV === 'production') {
-    if(process.env.APP_TYPE === 'cli') global.__resources = path.join('.', 'resources').replace(/\\/g, '\\\\')// eslint-disable-line{{/if_eq}}
-    else global.__resources = path.join(__dirname, '/resources').replace(/\\/g, '\\\\')// eslint-disable-line{{/if_eq}}
+if (process.env.NODE_ENV !== 'development') {
+    global.__resources = path.join(__dirname, '/resources').replace(/\\/g, '\\\\')
 }
 
 export const initDB = () => {
@@ -28,12 +27,20 @@ export const initDB = () => {
     })
 
     //commission.db
-    fse.copy(path.join(__resources, 'default', 'commission.db'), path.join(BASE_DB_DIR, 'commission.db'), err => {
+    fse.copy(
+        path.join(DEFUALT_DB_PATH, 'commission.db'), 
+        path.join(BASE_DB_DIR, 'commission.db')
+    )
+    .catch(err => {
         if(err) logger.error(err);
     })
 
     //holidays.db
-    fse.copy(path.join(__resources, 'default', 'holidays.db'), path.join(BASE_DB_DIR, 'holidays.db'), err => {
+    fse.copy(
+        path.join(DEFUALT_DB_PATH, 'holidays.db'), 
+        path.join(BASE_DB_DIR, 'holidays.db')
+    )
+    .catch(err => {
         if(err) logger.error(err);
     })
 }

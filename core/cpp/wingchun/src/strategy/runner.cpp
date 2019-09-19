@@ -1,9 +1,8 @@
-#include <utility>
-
 //
 // Created by Keren Dong on 2019-06-20.
 //
 
+#include <utility>
 #include <fmt/format.h>
 
 #include <kungfu/yijinjing/log/setup.h>
@@ -28,16 +27,27 @@ namespace kungfu
                     : apprentice(location::make(m, category::STRATEGY, group, name, std::move(locator)), low_latency)
             {}
 
+            Context_ptr Runner::make_context()
+            {
+                return std::make_shared<Context>(*this, events_);
+            }
+
             void Runner::add_strategy(const Strategy_ptr &strategy)
             {
                 strategies_.push_back(strategy);
             }
 
+            void Runner::on_trading_day(const yijinjing::event_ptr &event, int64_t daytime)
+            {
+                for (const auto &strategy : strategies_)
+                {
+                    strategy->on_trading_day(context_, daytime);
+                }
+            }
+
             void Runner::on_start()
             {
-                apprentice::on_start();
-
-                context_ = std::make_shared<Context>(*this, events_);
+                context_ = make_context();
                 context_->react();
 
                 for (const auto &strategy : strategies_)
@@ -90,9 +100,26 @@ namespace kungfu
                       }
                   });
 
+                apprentice::on_start();
+
                 for (const auto &strategy : strategies_)
                 {
                     strategy->post_start(context_);
+                }
+            }
+
+            void Runner::on_exit()
+            {
+                for (const auto &strategy : strategies_)
+                {
+                    strategy->pre_stop(context_);
+                }
+
+                apprentice::on_exit();
+
+                for (const auto &strategy : strategies_)
+                {
+                    strategy->post_stop(context_);
                 }
             }
 

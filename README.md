@@ -27,7 +27,7 @@
 如果需要接入更多柜台请通过 [Taurus.ai](http://taurus.ai) 官网联系我们。
 开发者也可根据长拳标准自行开发新的柜台接口。
 
-初次使用请参考 [功夫交易系统用户手册](https://app.gitbook.com/@taurusai/s/kungfu-userdoc/)
+初次使用请参考 [功夫交易系统用户手册](https://taurusai.gitbook.io/kungfu-manual/)
 
 更多介绍请关注知乎专栏 [硅商冲击](https://zhuanlan.zhihu.com/silicontrader)。
 
@@ -47,18 +47,18 @@ cmake (>3.12)
 
 功夫编译依赖 [Node.js](https://nodejs.org)，建议预先进行如下设置加速依赖包的下载：
 ```
-$ npm config set registry https://registry.npm.taobao.org
-$ npm config set puppeteer_download_host https://npm.taobao.org/mirrors
-$ npm config set electron_mirror https://npm.taobao.org/mirrors/electron/
-$ npm config set sass-binary-site https://npm.taobao.org/mirrors/node-sass
+npm config set registry https://registry.npm.taobao.org
+npm config set puppeteer_download_host https://npm.taobao.org/mirrors
+npm config set electron_mirror https://npm.taobao.org/mirrors/electron/
+npm config set sass-binary-site https://npm.taobao.org/mirrors/node-sass
 ```
 
 #### MacOSX
 
 ```
-$ brew install git cmake node@10
-$ npm install -g yarn electron-builder
-$ pip install pipenv
+brew install git cmake node@10
+npm install -g yarn electron-builder
+pip install pipenv
 ```
 
 #### Windows
@@ -72,11 +72,35 @@ C:\> npm install -g yarn electron-builder
 C:\> pip install pipenv
 ```
 
+注意不要使用 Win64 后缀的 generator，如果遇到如下报错：
+
+```
+CMake Error:
+  Generator
+
+    Visual Studio 15 2017 Win64
+
+  does not support platform specification, but platform
+
+    x64
+
+  was specified.
+```
+
+需要手动指定 cmake generator 之后重新编译：
+
+```
+npm config set cmake_js_G "Visual Studio 15 2017"
+yarn clean
+yarn build
+```
+
 #### Linux
 
 确保编译器支持 C++ 17，例如对于 CentOS，升级 gcc 到 5.0 以上：
 
 ```
+yum install rpm-build
 yum -y install centos-release-scl
 yum -y install devtoolset-8-gcc devtoolset-8-gcc-c++ devtoolset-8-binutils
 echo "source /opt/rh/devtoolset-8/enable" >> /etc/profile
@@ -85,7 +109,7 @@ source /etc/profile
 
 ```
 $ # install cmake3 node.js
-$ node-v10.15.3-linux-x64/bin/npm install -g yarn electron-builder
+$ node-v10.15.3-linux-x64/bin/npm install -g yarn
 $ pip install pipenv
 ```
 
@@ -112,19 +136,17 @@ $ yarn clean
 
 功夫默认编译为 Release 模式（-D[CMAKE_BUILD_TYPE](https://cmake.org/cmake/help/v3.12/variable/CMAKE_BUILD_TYPE.html)="Release")，如果希望以 Debug 模式编译，需要执行以下命令：
 ```
-$ npm config set kungfu-core:cmakejsopt "debug"
+$ npm config set kungfu-core:buildtype "Debug"
 ```
 
 执行以下命令恢复 Release 模式：
 ```
-$ npm config delete kungfu-core:cmakejsopt
+$ npm config set kungfu-core:buildtype "Release"
 ```
-
-更多可选设置请参考 [CMake.js Options](https://www.npmjs.com/package/cmake-js)。
 
 切换编译模式后，需要执行以下命令重新生成配置文件：
 ```
-$ yarn workspace kungfu-core run config
+$ yarn workspace kungfu-core run configure
 ```
 
 

@@ -50,29 +50,58 @@ namespace kungfu
 
         void apprentice::request_write_to(int64_t trigger_time, uint32_t dest_id)
         {
-            require_write_to(master_commands_location_->uid, trigger_time, dest_id);
+            if (get_io_device()->get_home()->mode == mode::LIVE)
+            {
+                require_write_to(master_commands_location_->uid, trigger_time, dest_id);
+            }
         }
 
         void apprentice::request_read_from(int64_t trigger_time, uint32_t source_id, bool pub)
         {
-            require_read_from(master_commands_location_->uid, trigger_time, source_id, pub);
+            if (get_io_device()->get_home()->mode == mode::LIVE)
+            {
+                require_read_from(master_commands_location_->uid, trigger_time, source_id, pub);
+            }
         }
 
-        void apprentice::add_timer(int64_t nanotime, const std::function<void(event_ptr)>& callback)
+        void apprentice::add_timer(int64_t nanotime, const std::function<void(event_ptr)> &callback)
         {
             events_ | timer(nanotime) |
             $([&, callback](event_ptr e)
-            {
-                callback(e);
-            });
+              {
+                  try
+                  { callback(e); }
+                  catch (const std::exception &e)
+                  {
+                      SPDLOG_ERROR("Unexpected exception by timer {}", e.what());
+                  }
+              },
+              [&](std::exception_ptr e)
+              {
+                  try
+                  { std::rethrow_exception(e); }
+                  catch (const rx::empty_error &ex)
+                  {
+                      SPDLOG_WARN("{}", ex.what());
+                  }
+                  catch (const std::exception &ex)
+                  {
+                      SPDLOG_WARN("Unexpected exception by timer{}", ex.what());
+                  }
+              });
         }
 
-        void apprentice::add_time_interval(int64_t duration, const std::function<void(event_ptr)>& callback)
+        void apprentice::add_time_interval(int64_t duration, const std::function<void(event_ptr)> &callback)
         {
             events_ | time_interval(std::chrono::nanoseconds(duration)) |
             $([&, callback](event_ptr e)
               {
-                  callback(e);
+                  try
+                  { callback(e); }
+                  catch (const std::exception &e)
+                  {
+                      SPDLOG_ERROR("Unexpected exception by time_interval {}", e.what());
+                  }
               });
         }
 
@@ -81,7 +110,7 @@ namespace kungfu
             if (get_io_device()->get_home()->mode == mode::LIVE)
             {
                 events_ | skip_until(events_ | is(msg::type::Register) | from(master_home_location_->uid)) | first() |
-                rx::timeout(seconds(1), observe_on_new_thread()) |
+                rx::timeout(seconds(10), observe_on_new_thread()) |
                 $([&](event_ptr e)
                   {
                       // timeout happens on new thread, can not subscribe journal reader here
@@ -106,10 +135,19 @@ namespace kungfu
                 $([&](event_ptr e)
                   {
                       reader_->join(master_commands_location_, get_live_home_uid(), e->gen_time());
+                  },
+                  [&](std::exception_ptr e)
+                  {
+                      SPDLOG_ERROR("Register failed");
                   });
-            } else
+            } else if (get_io_device()->get_home()->mode == mode::REPLAY)
             {
                 reader_->join(master_commands_location_, get_live_home_uid(), begin_time_);
+            } else if (get_io_device()->get_home()->mode == mode::BACKTEST)
+            {
+                // dest_id 0 should be configurable TODO
+                reader_->join(std::make_shared<location>(mode::BACKTEST, category::MD, get_io_device()->get_home()->group, 
+                             get_io_device()->get_home()->name, get_io_device()->get_home()->locator), 0, begin_time_);
             }
 
             events_ |
@@ -133,9 +171,7 @@ namespace kungfu
             events_ | is(msg::type::Deregister) |
             $([&](event_ptr e)
               {
-                  reader_->disjoin(e->source());
-                  writers_.erase(e->source());
-                  deregister_location(e->gen_time(), e->source());
+                  deregister_location_from_event(e);
               });
 
             events_ | is(msg::type::RequestWriteTo) |
@@ -145,18 +181,12 @@ namespace kungfu
               });
 
             events_ | filter([&](event_ptr e)
-                            {
-                                return e->msg_type() == msg::type::RequestReadFromPublic or e->msg_type() == msg::type::RequestReadFrom;
-                            }) |
+                             {
+                                 return e->msg_type() == msg::type::RequestReadFromPublic or e->msg_type() == msg::type::RequestReadFrom;
+                             }) |
             $([&](event_ptr e)
               {
                   on_read_from(e);
-              });
-
-            events_ | is(msg::type::RequestStart) | first() |
-            $([&](event_ptr e)
-              {
-                  on_start();
               });
 
             events_ | is(msg::type::TradingDay) |
@@ -165,7 +195,33 @@ namespace kungfu
                   on_trading_day(e, e->data<int64_t>());
               });
 
-            reader_->join(master_home_location_, 0, begin_time_);
+
+            if (get_io_device()->get_home()->mode != mode::BACKTEST)
+            {
+                reader_->join(master_home_location_, 0, begin_time_);
+                events_ | is(msg::type::RequestStart) | first() |
+                $([&](event_ptr e)
+                  {
+                      on_start();
+                  },
+                  [&](std::exception_ptr e)
+                  {
+                      try
+                      { std::rethrow_exception(e); }
+                      catch (const rx::empty_error &ex)
+                      {
+                          SPDLOG_WARN("{}", ex.what());
+                      }
+                      catch (const std::exception &ex)
+                      {
+                          SPDLOG_WARN("Unexpected exception before start {}", ex.what());
+                      }
+                  });
+            } else
+            {
+                on_start();
+            }
+
             if (get_io_device()->get_home()->mode == mode::LIVE)
             {
                 checkin();
@@ -184,9 +240,9 @@ namespace kungfu
                 }
             } else
             {
-                SPDLOG_ERROR("{} [{:08x}] asks publish to {} [{:08x}] for more than once",
-                             get_location(event->source())->uname, event->source(),
-                             get_location(request.dest_id)->uname, request.dest_id);
+                SPDLOG_INFO("writer from {} [{:08x}] to {} [{:08x}] already existed",
+                        get_location(event->source())->uname, event->source(),
+                        get_location(request.dest_id)->uname, request.dest_id);
             }
         }
 
@@ -242,6 +298,17 @@ namespace kungfu
                     get_io_device()->get_home()->locator
             );
             register_location(event->trigger_time(), app_location);
+        }
+
+        void apprentice::deregister_location_from_event(const yijinjing::event_ptr &event)
+        {
+            const char *buffer = &(event->data<char>());
+            std::string json_str{};
+            json_str.assign(buffer, event->data_length());
+            nlohmann::json location_json = nlohmann::json::parse(json_str);
+            uint32_t location_uid = location_json["uid"];
+            reader_->disjoin(location_uid);
+            deregister_location(event->trigger_time(), location_uid);
         }
     }
 }

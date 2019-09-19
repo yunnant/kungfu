@@ -9,6 +9,7 @@
 #include <kungfu/yijinjing/time.h>
 #include <kungfu/yijinjing/msg.h>
 #include <kungfu/wingchun/strategy/context.h>
+#include <kungfu/wingchun/utils.h>
 
 using namespace kungfu::practice;
 using namespace kungfu::rx;
@@ -24,7 +25,10 @@ namespace kungfu
         {
             Context::Context(practice::apprentice &app, const rx::connectable_observable<yijinjing::event_ptr> &events) :
                     app_(app), events_(events)
-            {}
+            {
+                auto home = app.get_io_device()->get_home();
+                log::copy_log_settings(home, home->name);
+            }
 
             void Context::react()
             {
@@ -86,16 +90,40 @@ namespace kungfu
 
                 auto home = app_.get_io_device()->get_home();
                 auto account_location = location::make(mode::LIVE, category::TD, source, account, home->locator);
-                if (not app_.has_location(account_location->uid))
+                if (home->mode == mode::LIVE and not app_.has_location(account_location->uid))
                 {
                     throw wingchun_error(fmt::format("invalid account {}@{}", account, source));
                 }
+
+                accounts_[account_id] = account_location;
+                account_cash_limits_[account_id] = cash_limit;
                 account_location_ids_[account_id] = account_location->uid;
 
                 app_.request_write_to(app_.now(), account_location->uid);
                 app_.request_read_from(app_.now(), account_location->uid, true);
                 app_.request_read_from(app_.now(), account_location->uid);
+
                 SPDLOG_INFO("added account {}@{} [{:08x}]", account, source, account_id);
+            }
+
+            std::vector<yijinjing::data::location_ptr> Context::list_accounts()
+            {
+                std::vector<yijinjing::data::location_ptr> acc_locations;
+                for (auto item : accounts_)
+                {
+                    acc_locations.push_back(item.second);
+                }
+                return acc_locations;
+            }
+
+            double Context::get_account_cash_limit(const std::string &account)
+            {
+                uint32_t account_id = yijinjing::util::hash_str_32(account);
+                if (account_cash_limits_.find(account_id) == account_cash_limits_.end())
+                {
+                    throw wingchun_error(fmt::format("invalid account {}", account));
+                }
+                return account_cash_limits_[account_id];
             }
 
             void Context::subscribe(const std::string &source, const std::vector<std::string> &symbols, const std::string &exchange)
@@ -115,7 +143,7 @@ namespace kungfu
                 }
                 uint32_t md_source = market_data_[source];
                 SPDLOG_INFO("strategy subscribe from {} [{:08x}]", source, md_source);
-                if (app_.get_writer(market_data_[source]).get() == nullptr)
+                if (not app_.has_writer(md_source))
                 {
                     events_ | is(yijinjing::msg::type::RequestWriteTo) |
                     filter([=](yijinjing::event_ptr e)
@@ -135,45 +163,23 @@ namespace kungfu
 
             void Context::request_subscribe(uint32_t source, const std::vector<std::string> &symbols, const std::string &exchange)
             {
-                auto writer = app_.get_writer(source);
-                char *buffer = const_cast<char *>(&(writer->open_frame(app_.now(), msg::type::Subscribe, 4096)->data<char>()));
-                hffix::message_writer sub_msg(buffer, buffer + 4096);
-                sub_msg.push_back_header("FIX.4.2");
-                sub_msg.push_back_string(hffix::tag::MsgType, "V");
-                sub_msg.push_back_int(hffix::tag::MDReqID, 1);
-                sub_msg.push_back_int(hffix::tag::SubscriptionRequestType, 1); // Snapshot + Updates (Subscribe)
-                sub_msg.push_back_int(hffix::tag::MarketDepth, 1);
-
-                sub_msg.push_back_int(hffix::tag::NoMDEntryTypes, 1);
-                sub_msg.push_back_int(hffix::tag::MDEntryType, 2);
-                sub_msg.push_back_int(hffix::tag::NoRelatedSym, symbols.size());
                 for (const auto &symbol : symbols)
                 {
-                    sub_msg.push_back_string(hffix::tag::Symbol, symbol);
-                    sub_msg.push_back_string(hffix::tag::SecurityExchange, exchange);
-                    quotes_[get_symbol_id(symbol, exchange)] = msg::data::Quote{};
-                    SPDLOG_INFO("request subscribe {}", symbol);
+                    write_subscribe_msg(app_.get_writer(source), app_.now(), exchange, symbol);
                 }
-                sub_msg.push_back_trailer();
-                writer->close_frame(sub_msg.message_end() - buffer);
             }
 
-            uint64_t Context::insert_order(const OrderInput &input)
+            uint64_t Context::insert_order(const std::string &symbol, const std::string &exchange, const std::string &account,
+                                                 double limit_price, int64_t volume, PriceType type, Side side, Offset offset)
             {
-                auto writer = app_.get_writer(lookup_account_location_id(std::string(input.account_id)));
-                msg::data::OrderInput &data = writer->open_data<msg::data::OrderInput>(0, msg::type::OrderInput);
-                memcpy(&data, &input, sizeof(OrderInput));
-                data.order_id = writer->current_frame_uid();
-                writer->close_data();
-                return data.order_id;
-            }
-
-            uint64_t Context::insert_limit_order(const std::string &symbol, const std::string &exchange, const std::string &account,
-                                                 double limit_price, int64_t volume, Side side, Offset offset)
-            {
+                auto inst_type = get_instrument_type(symbol, exchange);
+                if (inst_type != InstrumentType::Stock && inst_type != InstrumentType::Future)
+                {
+                    SPDLOG_ERROR("unsupported instrument type {} of {}.{}", str_from_instrument_type(inst_type), symbol, exchange);
+                    return 0;
+                }
                 auto writer = app_.get_writer(lookup_account_location_id(account));
                 msg::data::OrderInput &input = writer->open_data<msg::data::OrderInput>(0, msg::type::OrderInput);
-
                 input.order_id = writer->current_frame_uid();
                 strcpy(input.instrument_id, symbol.c_str());
                 strcpy(input.exchange_id, exchange.c_str());
@@ -181,106 +187,18 @@ namespace kungfu
                 input.limit_price = limit_price;
                 input.frozen_price = limit_price;
                 input.volume = volume;
+                input.price_type = type;
                 input.side = side;
                 input.offset = offset;
-                input.price_type = PriceType::Limit;
-                input.time_condition = TimeCondition::GFD;
-                input.volume_condition = VolumeCondition::Any;
-
-                writer->close_data();
-                return input.order_id;
-            }
-
-            uint64_t Context::insert_fak_order(const std::string &symbol, const std::string &exchange, const std::string &account,
-                                               double limit_price, int64_t volume, Side side, Offset offset)
-            {
-                auto writer = app_.get_writer(lookup_account_location_id(account));
-                msg::data::OrderInput &input = writer->open_data<msg::data::OrderInput>(0, msg::type::OrderInput);
-
-                input.order_id = writer->current_frame_uid();
-                strcpy(input.instrument_id, symbol.c_str());
-                strcpy(input.exchange_id, exchange.c_str());
-                strcpy(input.account_id, account.c_str());
-                input.limit_price = limit_price;
-                input.frozen_price = limit_price;
-                input.volume = volume;
-                input.side = side;
-                input.offset = offset;
-                input.price_type = PriceType::Limit;
-                input.time_condition = TimeCondition::IOC;
-                input.volume_condition = VolumeCondition::Any;
-
-                writer->close_data();
-                return input.order_id;
-            }
-
-            uint64_t Context::insert_fok_order(const std::string &symbol, const std::string &exchange, const std::string &account,
-                                               double limit_price, int64_t volume, Side side, Offset offset)
-            {
-                auto writer = app_.get_writer(lookup_account_location_id(account));
-                msg::data::OrderInput &input = writer->open_data<msg::data::OrderInput>(0, msg::type::OrderInput);
-
-                input.order_id = writer->current_frame_uid();
-                strcpy(input.instrument_id, symbol.c_str());
-                strcpy(input.exchange_id, exchange.c_str());
-                strcpy(input.account_id, account.c_str());
-                input.limit_price = limit_price;
-                input.frozen_price = limit_price;
-                input.volume = volume;
-                input.side = side;
-                input.offset = offset;
-                input.price_type = PriceType::Limit;
-                input.time_condition = TimeCondition::IOC;
-                input.volume_condition = VolumeCondition::All;
-
-                writer->close_data();
-                return input.order_id;
-            }
-
-            uint64_t Context::insert_market_order(const std::string &symbol, const std::string &exchange, const std::string &account,
-                                                  int64_t volume, Side side, Offset offset)
-            {
-                auto writer = app_.get_writer(lookup_account_location_id(account));
-                msg::data::OrderInput &input = writer->open_data<msg::data::OrderInput>(0, msg::type::OrderInput);
-
-                input.order_id = writer->current_frame_uid();
-                strcpy(input.instrument_id, symbol.c_str());
-                strcpy(input.exchange_id, exchange.c_str());
-                strcpy(input.account_id, account.c_str());
-                auto iter = quotes_.find(get_symbol_id(symbol, exchange));
-                if (iter != quotes_.end())
-                {
-                    input.frozen_price = iter->second.last_price;
-                }
-                input.volume = volume;
-                input.side = side;
-                input.offset = offset;
-
-                if (strcmp(input.exchange_id, EXCHANGE_SSE) == 0 || strcmp(input.exchange_id, EXCHANGE_SZE) == 0) //沪深市，最优五档转撤销
-                {
-                    input.price_type = PriceType::Best5;
-                    input.time_condition = TimeCondition::IOC;
-                    input.volume_condition = VolumeCondition::Any;
-                } else
-                {
-                    input.price_type = PriceType::Any;
-                    input.time_condition = TimeCondition::IOC;
-                    input.volume_condition = VolumeCondition::Any;
-                }
-
                 writer->close_data();
                 return input.order_id;
             }
 
             uint64_t Context::cancel_order(uint64_t order_id)
             {
-                uint32_t account_id = order_id >> 32;
-                if (account_location_ids_.find(account_id) == account_location_ids_.end())
-                {
-                    throw wingchun_error(fmt::format("invalid order id {}", order_id));
-                }
-
-                auto writer = app_.get_writer(account_location_ids_[account_id]);
+                uint32_t account_location_id = (order_id >> 32) ^ app_.get_home_uid();
+                SPDLOG_INFO("{:08x} cancel order {:016x} with account location {:08x}", app_.get_home_uid(), order_id, account_location_id);
+                auto writer = app_.get_writer(account_location_id);
                 msg::data::OrderAction &action = writer->open_data<msg::data::OrderAction>(0, msg::type::OrderAction);
 
                 action.order_action_id = writer->current_frame_uid();

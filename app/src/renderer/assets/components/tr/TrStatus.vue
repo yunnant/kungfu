@@ -6,7 +6,7 @@
 </template>
 
 <script>
-import {statusConfig} from '__gConfig/statusConfig';
+import { statusConfig } from '__gConfig/statusConfig';
 export default {
     name: 'tr-status',
     props: {
@@ -41,7 +41,7 @@ export default {
     display: inline-block;
     border-radius: 50%;
     vertical-align: middle;
-    background: $green;
+    background: $grey;
     position: relative;
     margin-right: 4px;
     &:after{
@@ -51,7 +51,7 @@ export default {
         width: 6px;
         height: 6px;
         border-radius: 50%;
-        border: 1px solid $green;
+        border: 1px solid $grey;
         content: "";
         animation: antStatusProcessing 1s infinite ease-in-out;
     }

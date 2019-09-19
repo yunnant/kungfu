@@ -65,36 +65,36 @@ export default {
             },
         };
         return {
-            dayData: [[],[]],
+            dayData: [Object.freeze([]), Object.freeze([])],
             dayPnlData: [],
         }
     },
 
     mounted() {
         const t = this
-        if(t.currentId) t.getDayData()
+        if(t.currentId) t.getDayData();
         window.addEventListener("resize", () => { 
-            t.myChart && t.myChart.resize()
+            t.myChart && t.myChart.resize();
         })
     },
 
     computed: {
         ...mapState({
-            calendar: state => state.BASE.calendar, //日期信息，包含交易日
+            tradingDay: state => state.BASE.tradingDay, //日期信息，包含交易日
         }),
 
         accumulatedPnlRatio(){
             const t = this;
             if(!t.dayPnlData.length) return '--'
             const len =  t.dayPnlData.length;
-            return t.calcuAccumlatedPnlRatio(t.dayPnlData[len - 1])
+            return t.calcuAccumlatedPnlRatio(t.dayPnlData[len - 1], t.dayPnlData[0])
         },
 
         accumulatedPnl(){
             const t = this;
             if(!t.dayPnlData.length) return '--'
             const len =  t.dayPnlData.length;
-            return t.calcuAccumlatedPnl(t.dayPnlData[len - 1])
+            return t.calcuAccumlatedPnl(t.dayPnlData[len - 1], t.dayPnlData[0])
         }
     },
 
@@ -105,10 +105,10 @@ export default {
         },
 
         currentId(val) {
-            const t = this
+            const t = this;
             t.resetData();
-            if(!val) return;
-            t.getDayData()            
+            if(val) t.getDayData();
+                     
         },
 
         dayPnlData(newVal, oldVal){
@@ -129,8 +129,8 @@ export default {
             t.myChart = echarts.getInstanceByDom(dom)
             if( t.myChart === undefined) t.myChart = echarts.init(dom)
             let defaultConfig = deepClone(lineConfig)  
-            defaultConfig.xAxis.data = t.dayData[0] || ''
-            defaultConfig.series = { data: t.dayData[1], ...t.echartsSeries }
+            defaultConfig.xAxis.data = t.dayData[0] || []
+            defaultConfig.series = { data: t.dayData[1] || [], ...t.echartsSeries }
             t.myChart.setOption(defaultConfig)
         },
 
@@ -147,13 +147,14 @@ export default {
                     const tradingDay = item.trading_day
                     t.dayGroupKey[tradingDay] = item
                     xAxisData.push(tradingDay)
-                    serirsData.push(t.calcuAccumlatedPnl(item))
+                    const fistCashData = serirsData[0] || null
+                    serirsData.push(t.calcuAccumlatedPnl(item, fistCashData))
                 })
                 t.dayData = [Object.freeze(xAxisData), Object.freeze(serirsData)]
                 t.dayPnlData = Object.freeze(data || [])
             })
             .then(() => t.initChart())
-            .then(() => t.minMethod(t.currentId, t.calendar.trading_day)) //查找分钟线的数据库中的数据，拿到最后一条数据放入日线最后
+            .then(() => t.minMethod(t.currentId, t.tradingDay)) //查找分钟线的数据库中的数据，拿到最后一条数据放入日线最后
             .then(minData => minData.length && t.dealMinData(minData[minData.length - 1]))
             .catch(err => t.$message.error(err.message || '获取失败'))
             .finally(() => t.updateChart())
@@ -170,7 +171,7 @@ export default {
             if(timeLength && t.dayData[0][timeLength - 1] === tradingDay) {
                 let tmpDayData1 = t.dayData[1].slice();
                 tmpDayData1.pop()
-                tmpDayData1.push(t.calcuAccumlatedPnl(data))
+                tmpDayData1.push(t.calcuAccumlatedPnl(data, tmpDayData1[0]))
                 t.dayData[1] = Object.freeze(tmpDayData1);
 
                 let tmpDayPnlData = t.dayPnlData.slice();
@@ -179,12 +180,10 @@ export default {
                 t.dayPnlData = Object.freeze(tmpDayPnlData)
             }else{
                 let tmpDayData0 = t.dayData[0].slice();
-                tmpDayData0.push(tradingDay);
-                t.dayData[0] = Object.freeze(tmpDayData0);
-
+                tmpDayData0.push(tradingDay);       
                 let tmpDayData1 = t.dayData[1].slice()
-                tmpDayData1.push(t.calcuAccumlatedPnl(data))
-                t.dayPnlData[1] = Object.freeze(tmpDayData1)
+                tmpDayData1.push(t.calcuAccumlatedPnl(data, tmpDayData1[0]))
+                t.dayData = [Object.freeze(tmpDayData0), Object.freeze(tmpDayData1)]
 
                 let tmpDayPnlData = t.dayPnlData.slice();
                 tmpDayPnlData.push(Object.freeze(data));
@@ -192,12 +191,14 @@ export default {
             }
         },
 
-        calcuAccumlatedPnl(pnlData) {
-            return toDecimal(pnlData.realized_pnl + pnlData.unrealized_pnl, 2)
+        calcuAccumlatedPnl(pnlData, firstPnlData) {
+            if(!firstPnlData) firstPnlData = {}
+            return toDecimal((pnlData.dynamic_equity || 0) - (firstPnlData.static_equity || 0), 2)
         },
 
-        calcuAccumlatedPnlRatio(pnlData) {
-            return toDecimal((pnlData.realized_pnl + pnlData.unrealized_pnl) / pnlData.initial_equity, 4, 2)
+        calcuAccumlatedPnlRatio(pnlData, firstPnlData) {
+            if(!firstPnlData) firstPnlData = {}
+            return toDecimal(((pnlData.dynamic_equity || 0) - (firstPnlData.static_equity || 0)) / firstPnlData.static_equity, 4, 2)
         },
 
         dealNanomsg(nanomsg) {

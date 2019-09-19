@@ -21,7 +21,12 @@
                         <i class="el-icon-s-order" ></i>
                         <template slot="title">策略</template>
                     </tr-menu-item>
-                    
+                     <!-- <tr-menu-item
+                    route="/extension"
+                    >
+                        <i class="el-icon-box" ></i>
+                        <template slot="title">插件</template>
+                    </tr-menu-item> -->
                 </tr-menu>
             </el-aside>
             <el-main class="tr-main">
@@ -31,10 +36,18 @@
 
         <!-- 底部 -->
         <el-footer height="30px">
-            <div class="footer-content">
-                <tr-footer-item class="fr">
+            <div class="footer-content" >
+                <tr-footer-item class="fr" v-if="currentRouter !== 'code'">
+                    <CoreStatus></CoreStatus>
+                </tr-footer-item>
+             
+                <tr-footer-item class="fr" v-if="currentRouter !== 'code'">
                     <EngineStatus></EngineStatus>
                 </tr-footer-item>
+
+				<tr-footer-item class="fr" v-if="currentRouter === 'code'">
+					<CodeSpaceTab></CodeSpaceTab>
+				</tr-footer-item>
             </div>
         </el-footer>
 
@@ -45,6 +58,8 @@
 import {deepClone} from '__gUtils/busiUtils';
 import {mapState, mapGetters} from 'vuex';
 import EngineStatus from './components/EngineStatus';
+import CoreStatus from './components/CoreStatus';
+import CodeSpaceTab from './components/CodeSpaceTab';
 import MainHeader from './components/MainHeader';
 
 export default {
@@ -55,28 +70,30 @@ export default {
             default: true
         }
     },
+
     data() {
         return {
+            currentRouter: '',
             infoListVisiblity: false,
             navOpend: deepClone(this.$store.state.BASE.navOpend),
         }
     },
 
+    created() {
+        this.currentRouter = this.$router.history.current.name
+    },
+
     components: {
         EngineStatus,
-        MainHeader
+        MainHeader,
+		CoreStatus,
+		CodeSpaceTab
     },
 
     computed:{
         ...mapState({
             tradeLogVisible: state => state.BASE.tradeLogVisible
-        }),
-        ...mapGetters({
-        }),
-        
-        //当没有柜台的时候，不显示
-        showEngines() {
-        }
+        })
     },
 
     methods:{
@@ -87,11 +104,9 @@ export default {
 <style lang="scss">
 @import '@/assets/scss/layout.scss';
 @import '@/assets/scss/skin.scss';
-// .title-bar{
-//     height: 24px;
-//     line-height: 24px;
-//     background: $bg;
-//     border-bottom: 1px solid $bg_dark;
-// }
+
+.kf-footer-popover{
+    box-shadow: 0px 0px 30px $bg
+}
 </style>
 
